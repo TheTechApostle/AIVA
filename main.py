@@ -472,6 +472,12 @@ async def privacy():
     with open("privacy.html", encoding="utf-8") as f:
         return f.read()
 
+
+@app.get("/services", response_class=HTMLResponse)
+async def privacy():
+    with open("services.html", encoding="utf-8") as f:
+        return f.read()
+
 @app.post("/transcribe")
 async def transcribe_audio(request: Request):
     """Speech-to-text using local Whisper — free, no API needed."""
