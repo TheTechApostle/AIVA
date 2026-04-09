@@ -1,13 +1,13 @@
 import os
 import json
-import asyncio
 import base64
 import tempfile
+import threading
 from datetime import datetime, timedelta
 from typing import Optional
 import httpx
 
-# Load .env file automatically — no need to manually export vars
+# ── Load .env automatically ───────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -15,8 +15,9 @@ try:
 except ImportError:
     print("[INFO] python-dotenv not installed, using system environment variables")
 
-# Required for OAuth over HTTP on localhost (remove in production with HTTPS)
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+# ── Required for OAuth over HTTP on localhost (REMOVE in production) ──────────
+if os.getenv("ENVIRONMENT", "development") != "production":
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -30,8 +31,29 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request as GoogleRequest
 
-# OpenAI
+# ── Groq (free) with OpenAI fallback ─────────────────────────────────────────
+try:
+    from groq import AsyncGroq
+    _groq_available = True
+except ImportError:
+    _groq_available = False
+
 from openai import AsyncOpenAI
+
+# ── Local Whisper (free STT) ──────────────────────────────────────────────────
+_whisper_model = None
+_whisper_lock  = threading.Lock()
+
+def get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        with _whisper_lock:
+            if _whisper_model is None:
+                import whisper
+                logger.info("Loading Whisper model (first run downloads ~140MB)...")
+                _whisper_model = whisper.load_model("base")
+                logger.info("Whisper ready!")
+    return _whisper_model
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -47,49 +69,69 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-OPENAI_API_KEY = "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"
-GOOGLE_CLIENT_ID = "514385349603-e43eh06npjoojgoulinsra2av2sb5u18.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET = "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"
+GROQ_API_KEY         = os.getenv("GROQ_API_KEY", "")
+OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY", "")   # fallback if no Groq key
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 REDIRECT_URI         = os.getenv("REDIRECT_URI", "http://localhost:8000/auth/callback")
+ENVIRONMENT          = os.getenv("ENVIRONMENT", "development")
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
+# ── Pick AI client: Groq preferred (free), OpenAI as fallback ─────────────────
+def get_ai_client():
+    if GROQ_API_KEY and _groq_available:
+        return AsyncGroq(api_key=GROQ_API_KEY), "groq"
+    elif OPENAI_API_KEY:
+        return AsyncOpenAI(api_key=OPENAI_API_KEY), "openai"
+    return None, None
+
+ai_client, ai_provider = get_ai_client()
+
 # ── Startup validation ────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_check():
-    if not OPENAI_API_KEY:
-        logger.error("OPENAI_API_KEY is not set! Chat and voice will NOT work.")
+    if ai_client is None:
+        logger.error("No AI key found! Set GROQ_API_KEY (free) or OPENAI_API_KEY in .env")
     else:
-        logger.info(f"OpenAI API key loaded (...{OPENAI_API_KEY[-4:]})")
+        key_hint = GROQ_API_KEY[-4:] if ai_provider == "groq" else OPENAI_API_KEY[-4:]
+        logger.info(f"AI provider: {ai_provider.upper()} (...{key_hint})")
     if not GOOGLE_CLIENT_ID:
         logger.warning("GOOGLE_CLIENT_ID not set — Google Calendar will not work.")
     else:
         logger.info("Google OAuth credentials loaded")
-
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    logger.info(f"Environment: {ENVIRONMENT}")
+    logger.info("STT: local Whisper | TTS: browser built-in")
 
 # In-memory stores (use Redis/DB in production)
-token_store: dict = {}
+token_store:        dict = {}
 conversation_store: dict = {}
-flow_store: dict = {}   # keeps OAuth flow alive between /auth/google and /auth/callback
+flow_store:         dict = {}   # keeps OAuth flow alive between /auth/google and callback
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class ChatMessage(BaseModel):
     session_id: str
     message: str
 
+class EventCreate(BaseModel):
+    summary: str
+    description: Optional[str] = ""
+    start: str
+    end: str
+    location: Optional[str] = ""
+    attendees: Optional[list] = []
+
 # ── Google Calendar helpers ───────────────────────────────────────────────────
 def get_calendar_service(session_id: str):
     if session_id not in token_store:
-        raise HTTPException(status_code=401, detail="Not authenticated with Google Calendar")
+        raise HTTPException(status_code=401, detail="Not authenticated with Google")
     creds_data = token_store[session_id]
     creds = Credentials(
         token=creds_data.get("token"),
@@ -123,18 +165,22 @@ def delete_event(session_id: str, event_id: str):
     service.events().delete(calendarId="primary", eventId=event_id).execute()
     return True
 
-# ── OpenAI Tool definitions ───────────────────────────────────────────────────
+def update_event(session_id: str, event_id: str, event_data: dict):
+    service = get_calendar_service(session_id)
+    return service.events().update(calendarId="primary", eventId=event_id, body=event_data).execute()
+
+# ── Calendar tool definitions ─────────────────────────────────────────────────
 CALENDAR_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "list_upcoming_events",
-            "description": "List upcoming calendar events. Use when user asks about schedule or what is on their calendar.",
+            "description": "List upcoming calendar events. Use when user asks about their schedule, upcoming events, or what's on their calendar.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "max_results": {"type": "integer", "default": 10},
-                    "days_ahead":  {"type": "integer", "default": 7},
+                    "max_results": {"type": "integer", "description": "Maximum number of events to return (default 10)", "default": 10},
+                    "days_ahead":  {"type": "integer", "description": "How many days ahead to look (default 7)", "default": 7},
                 },
             },
         },
@@ -143,16 +189,16 @@ CALENDAR_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_calendar_event",
-            "description": "Create a new calendar event. Use when user wants to schedule or book something.",
+            "description": "Create a new calendar event. Use when user wants to schedule, book, or add an event.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary":        {"type": "string"},
-                    "description":    {"type": "string"},
-                    "start_datetime": {"type": "string", "description": "ISO 8601 e.g. 2024-01-15T14:00:00"},
-                    "end_datetime":   {"type": "string"},
-                    "location":       {"type": "string"},
-                    "attendees":      {"type": "array", "items": {"type": "string"}},
+                    "summary":        {"type": "string", "description": "Event title/name"},
+                    "description":    {"type": "string", "description": "Event description (optional)"},
+                    "start_datetime": {"type": "string", "description": "Start datetime in ISO 8601 format (e.g. 2024-01-15T14:00:00)"},
+                    "end_datetime":   {"type": "string", "description": "End datetime in ISO 8601 format"},
+                    "location":       {"type": "string", "description": "Event location (optional)"},
+                    "attendees":      {"type": "array", "items": {"type": "string"}, "description": "List of attendee email addresses (optional)"},
                 },
                 "required": ["summary", "start_datetime", "end_datetime"],
             },
@@ -162,12 +208,12 @@ CALENDAR_TOOLS = [
         "type": "function",
         "function": {
             "name": "delete_calendar_event",
-            "description": "Delete or cancel a calendar event.",
+            "description": "Delete/cancel a calendar event. Use when user wants to remove or cancel an event.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "event_id":      {"type": "string"},
-                    "event_summary": {"type": "string"},
+                    "event_id":      {"type": "string", "description": "The event ID to delete"},
+                    "event_summary": {"type": "string", "description": "Event name (for confirmation)"},
                 },
                 "required": ["event_id"],
             },
@@ -177,31 +223,30 @@ CALENDAR_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_todays_schedule",
-            "description": "Get today's full schedule.",
+            "description": "Get today's schedule specifically. Use when user asks about today.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
 
-SYSTEM_PROMPT = """You are ARIA — an intelligent, warm AI scheduling assistant with full access to the user's Google Calendar.
+SYSTEM_PROMPT = """You are ARIA — an intelligent, warm, and efficient AI scheduling assistant with full access to the user's Google Calendar.
 
-Capabilities:
+Your capabilities:
 - View, create, update, and delete calendar events
-- Understand natural language dates (next Tuesday, tomorrow at 3pm, in two weeks)
 - Help plan schedules and find free time slots
+- Set reminders and manage recurring events
+- Understand natural language dates ("next Tuesday", "tomorrow at 3pm", "in two weeks")
 
 Today's date and time: {current_datetime}
 
 Guidelines:
-- Be conversational and concise
+- Be conversational, concise, and proactive
 - Always confirm before deleting events
-- Infer reasonable durations if not given (meetings: 1hr, calls: 30min)
+- When creating events, infer reasonable durations if not specified (meetings: 1hr, calls: 30min)
+- Use 24h or 12h time based on user preference
 - After completing an action, briefly summarize what was done
-- Format event lists clearly with dates, times, and titles 
-- You are to automatically schedule in my google calendar
-
-
-"""
+- If you need clarification, ask one focused question
+- Format event lists clearly with dates, times, and titles"""
 
 
 async def process_tool_call(tool_name: str, tool_args: dict, session_id: str) -> str:
@@ -227,7 +272,7 @@ async def process_tool_call(tool_name: str, tool_args: dict, session_id: str) ->
                     formatted = dt.strftime("%a %b %d, %Y at %I:%M %p")
                 except Exception:
                     formatted = start
-                lines.append(f"[{e['id']}] {e.get('summary', 'Untitled')} — {formatted}")
+                lines.append(f"• [{e['id']}] {e.get('summary', 'Untitled')} — {formatted}")
             return "\n".join(lines)
 
         elif tool_name == "create_calendar_event":
@@ -242,11 +287,11 @@ async def process_tool_call(tool_name: str, tool_args: dict, session_id: str) ->
             if tool_args.get("attendees"):
                 event_body["attendees"] = [{"email": a} for a in tool_args["attendees"]]
             event = create_event(session_id, event_body)
-            return f"Event created! ID: {event['id']} | Link: {event.get('htmlLink', 'N/A')}"
+            return f"Event created successfully! ID: {event['id']} | Link: {event.get('htmlLink', 'N/A')}"
 
         elif tool_name == "delete_calendar_event":
             delete_event(session_id, tool_args["event_id"])
-            return f"Event '{tool_args.get('event_summary', tool_args['event_id'])}' deleted."
+            return f"Event '{tool_args.get('event_summary', tool_args['event_id'])}' deleted successfully."
 
         elif tool_name == "get_todays_schedule":
             today    = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -260,8 +305,8 @@ async def process_tool_call(tool_name: str, tool_args: dict, session_id: str) ->
             ).execute()
             events = result.get("items", [])
             if not events:
-                return "Your calendar is clear today."
-            lines = [f"Today ({today.strftime('%A, %B %d')}):"]
+                return "Your calendar is clear today! No events scheduled."
+            lines = [f"Today's schedule ({today.strftime('%A, %B %d')}):"]
             for e in events:
                 start = e["start"].get("dateTime", e["start"].get("date", ""))
                 try:
@@ -274,16 +319,16 @@ async def process_tool_call(tool_name: str, tool_args: dict, session_id: str) ->
         return f"Unknown tool: {tool_name}"
 
     except HTTPException as e:
-        return f"Calendar error: {e.detail}"
+        return f"Error: {e.detail}"
     except Exception as e:
-        logger.error(f"Tool '{tool_name}' error: {e}", exc_info=True)
-        return f"Error running {tool_name}: {str(e)}"
+        logger.error(f"Tool error: {e}", exc_info=True)
+        return f"Error executing {tool_name}: {str(e)}"
 
 
 async def chat_with_ai(session_id: str, user_message: str) -> str:
-    if not OPENAI_API_KEY:
-        return ("OpenAI API key is not configured. "
-                "Please add OPENAI_API_KEY=sk-... to your .env file and restart the server.")
+    if ai_client is None:
+        return ("No AI key configured. Add GROQ_API_KEY (free at console.groq.com) "
+                "or OPENAI_API_KEY to your .env file and restart.")
 
     if session_id not in conversation_store:
         conversation_store[session_id] = []
@@ -292,42 +337,46 @@ async def chat_with_ai(session_id: str, user_message: str) -> str:
     history.append({"role": "user", "content": user_message})
 
     is_authenticated = session_id in token_store
-    system   = SYSTEM_PROMPT.format(current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M (%A)"))
+    system = SYSTEM_PROMPT.format(current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M (%A)"))
     if not is_authenticated:
-        system += ("\n\nNOTE: User has NOT connected Google Calendar yet. "
-                   "If they ask about calendar actions, remind them to click 'Connect Google Calendar' first.")
+        system += "\n\nNOTE: User has NOT connected Google Calendar yet. If they ask about calendar actions, kindly remind them to click 'Connect Google Calendar' first."
 
     messages = [{"role": "system", "content": system}] + history[-20:]
     tools    = CALENDAR_TOOLS if is_authenticated else None
 
-    response = await openai_client.chat.completions.create(
-        model="gpt-4o",
+    # Pick model based on provider
+    model = "llama-3.3-70b-versatile" if ai_provider == "groq" else "gpt-4o"
+
+    response = await ai_client.chat.completions.create(
+        model=model,
         messages=messages,
         tools=tools,
         tool_choice="auto" if tools else None,
         temperature=0.7,
+        max_tokens=1024,
     )
     msg = response.choices[0].message
 
-    # Resolve tool calls
+    # Handle tool calls
     while msg.tool_calls:
         tool_results = []
         for tc in msg.tool_calls:
             args   = json.loads(tc.function.arguments)
             result = await process_tool_call(tc.function.name, args, session_id)
-            logger.info(f"Tool '{tc.function.name}' result: {result[:120]}")
+            logger.info(f"Tool '{tc.function.name}': {result[:100]}")
             tool_results.append({"tool_call_id": tc.id, "role": "tool", "content": result})
 
         messages.append(msg)
         messages.extend(tool_results)
 
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o", messages=messages,
-            tools=tools, tool_choice="auto", temperature=0.7,
+        response = await ai_client.chat.completions.create(
+            model=model, messages=messages,
+            tools=tools, tool_choice="auto",
+            temperature=0.7, max_tokens=1024,
         )
         msg = response.choices[0].message
 
-    assistant_reply = msg.content or "I could not generate a response."
+    assistant_reply = msg.content or "I couldn't generate a response."
     history.append({"role": "assistant", "content": assistant_reply})
     conversation_store[session_id] = history[-40:]
     return assistant_reply
@@ -337,25 +386,28 @@ async def chat_with_ai(session_id: str, user_message: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
+    # encoding="utf-8" fixes Windows charmap crash
     with open("static/index.html", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/health")
 async def health():
-    """Quick check — visit /health to see if keys are loaded."""
     return {
-        "status": "ok",
+        "status":            "ok",
+        "ai_provider":       ai_provider or "none",
+        "groq_configured":   bool(GROQ_API_KEY),
         "openai_configured": bool(OPENAI_API_KEY),
         "google_configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
+        "environment":       ENVIRONMENT,
+        "stt":               "local-whisper",
+        "tts":               "browser-builtin",
     }
 
 @app.get("/auth/google")
 async def auth_google(session_id: str = "default"):
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(
-            status_code=500,
-            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env."
-        )
+        raise HTTPException(status_code=500,
+            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.")
     flow = Flow.from_client_config(
         {"web": {
             "client_id":     GOOGLE_CLIENT_ID,
@@ -370,16 +422,16 @@ async def auth_google(session_id: str = "default"):
         access_type="offline", include_granted_scopes="true",
         state=session_id, prompt="consent",
     )
-    # Persist the flow so the callback can reuse it (fixes invalid_grant / missing code verifier)
+    # Store flow so callback can reuse code_verifier (fixes invalid_grant)
     flow_store[state] = flow
     return RedirectResponse(auth_url)
 
 @app.get("/auth/callback")
 async def auth_callback(request: Request, code: str, state: str = "default"):
-    # Retrieve the original flow (carries code_verifier and state)
+    # Retrieve the same flow object (carries PKCE code_verifier)
     flow = flow_store.pop(state, None)
     if flow is None:
-        # Fallback: rebuild flow without PKCE (older Google accounts)
+        # Fallback: rebuild without PKCE
         flow = Flow.from_client_config(
             {"web": {
                 "client_id":     GOOGLE_CLIENT_ID,
@@ -390,16 +442,14 @@ async def auth_callback(request: Request, code: str, state: str = "default"):
             }},
             scopes=SCOPES, redirect_uri=REDIRECT_URI,
         )
-    # Use the full authorization_response URL — most reliable method
+    # Pass full URL — most reliable, handles PKCE correctly
     authorization_response = str(request.url)
-    # Force http for localhost (oauthlib requires this matches what was sent)
     if "localhost" in authorization_response:
         authorization_response = authorization_response.replace("https://", "http://")
     flow.fetch_token(authorization_response=authorization_response)
     creds = flow.credentials
-    session_id = state
-    token_store[session_id] = {"token": creds.token, "refresh_token": creds.refresh_token}
-    return RedirectResponse(f"/?session_id={session_id}&auth=success")
+    token_store[state] = {"token": creds.token, "refresh_token": creds.refresh_token}
+    return RedirectResponse(f"/?session_id={state}&auth=success")
 
 @app.get("/auth/status")
 async def auth_status(session_id: str = "default"):
@@ -411,68 +461,46 @@ async def chat(msg: ChatMessage):
         reply = await chat_with_ai(msg.session_id, msg.message)
         return {"reply": reply}
     except Exception as e:
-        logger.error(f"Chat endpoint error: {e}", exc_info=True)
-        # Return a real error message instead of generic frontend failure
-        return JSONResponse(
-            status_code=200,  # keep 200 so frontend renders it as a message
-            content={"reply": f"Server error: {str(e)} — check your server terminal for details."}
-        )
+        logger.error(f"Chat error: {e}", exc_info=True)
+        # Return 200 so frontend shows it as a chat message not a crash
+        return JSONResponse(status_code=200,
+            content={"reply": f"Server error: {str(e)} — check your terminal for details."})
 
 @app.post("/transcribe")
 async def transcribe_audio(request: Request):
+    """Speech-to-text using local Whisper — free, no API needed."""
     try:
         data      = await request.json()
         audio_b64 = data.get("audio")
         if not audio_b64:
             raise HTTPException(status_code=400, detail="No audio data provided")
-        if not OPENAI_API_KEY:
-            raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
         audio_bytes = base64.b64decode(audio_b64)
 
-        # Use mkstemp for Windows-safe temp file handling
+        # mkstemp = Windows-safe (no file lock issue unlike NamedTemporaryFile)
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".webm")
         try:
             with os.fdopen(tmp_fd, "wb") as f:
                 f.write(audio_bytes)
-            with open(tmp_path, "rb") as f:
-                transcript = await openai_client.audio.transcriptions.create(
-                    model="whisper-1", file=f, response_format="text",
-                )
-            return {"text": transcript}
+            model  = get_whisper()
+            result = model.transcribe(tmp_path)
+            return {"text": result.get("text", "").strip()}
         finally:
             try:
                 os.unlink(tmp_path)
             except Exception:
-                pass  # Non-critical cleanup
+                pass
 
+    except ImportError:
+        raise HTTPException(status_code=500,
+            detail="Whisper not installed. Run: pip install openai-whisper  and install ffmpeg.")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Transcription error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
-@app.post("/speak")
-async def text_to_speech(request: Request):
-    try:
-        data = await request.json()
-        text = data.get("text", "").strip()
-        if not text:
-            raise HTTPException(status_code=400, detail="No text provided")
-        if not OPENAI_API_KEY:
-            raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
-
-        clean    = text.replace("**", "").replace("*", "").replace("`", "").replace("\n", " ")
-        response = await openai_client.audio.speech.create(
-            model="tts-1", voice="nova", input=clean[:4096]
-        )
-        return {"audio": base64.b64encode(response.content).decode()}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"TTS error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
+# /speak is intentionally removed — TTS is handled by browser speechSynthesis API (free)
 
 @app.get("/events")
 async def get_events(session_id: str = "default"):
@@ -512,3 +540,4 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.info(f"WS disconnected: {session_id}")
     except Exception as e:
         logger.error(f"WS error: {e}")
+        await websocket.close()
