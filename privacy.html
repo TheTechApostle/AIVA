@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Privacy Policy — ARIA Voice Scheduler</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #080c14;
+    --surface: #0d1420;
+    --border: rgba(99,179,237,0.12);
+    --accent: #4fa3e8;
+    --accent2: #a78bfa;
+    --text: #e2eaf6;
+    --muted: #8499bb;
+    --green: #34d399;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh; line-height: 1.7;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 600px 400px at top right, rgba(79,163,232,0.05), transparent),
+      radial-gradient(ellipse 500px 400px at bottom left, rgba(167,139,250,0.05), transparent);
+  }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(8,12,20,0.9); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo {
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    text-decoration: none;
+  }
+  .nav-back {
+    font-size: 13px; color: var(--muted); text-decoration: none;
+    display: flex; align-items: center; gap: 6px;
+    transition: color 0.2s;
+  }
+  .nav-back:hover { color: var(--accent); }
+
+  /* Hero */
+  .hero {
+    text-align: center; padding: 72px 24px 48px;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero-badge {
+    display: inline-block;
+    background: rgba(79,163,232,0.1); border: 1px solid rgba(79,163,232,0.3);
+    color: var(--accent); border-radius: 20px;
+    font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    padding: 5px 14px; margin-bottom: 20px;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .hero h1 {
+    font-family: 'Syne', sans-serif; font-size: clamp(28px, 5vw, 44px);
+    font-weight: 800; letter-spacing: -1px;
+    margin-bottom: 14px;
+  }
+  .hero p { color: var(--muted); font-size: 15px; max-width: 480px; margin: 0 auto; }
+  .updated {
+    margin-top: 16px; font-size: 12px; color: var(--muted);
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  /* Content */
+  .container {
+    max-width: 760px; margin: 0 auto;
+    padding: 56px 24px 80px;
+  }
+
+  .section {
+    margin-bottom: 48px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  .section::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+    border-radius: 4px 0 0 4px;
+  }
+  .section-num {
+    font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--accent); font-family: 'DM Sans', sans-serif;
+    margin-bottom: 8px;
+  }
+  .section h2 {
+    font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700;
+    margin-bottom: 16px; color: var(--text);
+  }
+  .section p {
+    color: var(--muted); font-size: 14.5px; margin-bottom: 12px;
+  }
+  .section p:last-child { margin-bottom: 0; }
+  .section ul {
+    list-style: none; padding: 0; margin: 12px 0;
+  }
+  .section ul li {
+    color: var(--muted); font-size: 14.5px;
+    padding: 6px 0 6px 20px; position: relative;
+  }
+  .section ul li::before {
+    content: '→';
+    position: absolute; left: 0;
+    color: var(--accent); font-size: 12px;
+  }
+
+  /* Highlight box */
+  .highlight {
+    background: rgba(52,211,153,0.06);
+    border: 1px solid rgba(52,211,153,0.2);
+    border-radius: 10px; padding: 14px 18px;
+    margin-top: 16px;
+    font-size: 14px; color: var(--green);
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .highlight .icon { flex-shrink: 0; font-size: 16px; }
+
+  /* Contact */
+  .contact-card {
+    background: linear-gradient(135deg, rgba(79,163,232,0.08), rgba(167,139,250,0.08));
+    border: 1px solid rgba(79,163,232,0.2);
+    border-radius: 16px; padding: 32px 36px;
+    text-align: center; margin-top: 48px;
+  }
+  .contact-card h3 {
+    font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .contact-card p { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+  .contact-link {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--accent), #3b82f6);
+    color: white; text-decoration: none;
+    padding: 12px 28px; border-radius: 12px;
+    font-size: 14px; font-weight: 500;
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px rgba(79,163,232,0.3);
+  }
+  .contact-link:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(79,163,232,0.4);
+  }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 40px;
+    text-align: center;
+    font-size: 12px; color: var(--muted);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 600px) {
+    nav { padding: 14px 20px; }
+    .hero { padding: 48px 20px 36px; }
+    .section { padding: 24px 20px; }
+    .contact-card { padding: 24px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="/">🎙️ ARIA</a>
+  <a class="nav-back" href="/">← Back to App</a>
+</nav>
+
+<div class="hero">
+  <div class="hero-badge">Legal</div>
+  <h1>Privacy Policy</h1>
+  <p>How ARIA collects, uses, and protects your information when you use our voice scheduling assistant.</p>
+  <div class="updated">Last updated: April 2026</div>
+</div>
+
+<div class="container">
+
+  <div class="section">
+    <div class="section-num">01</div>
+    <h2>Overview</h2>
+    <p>ARIA ("we", "our", "the app") is a voice-powered AI scheduling assistant that integrates with Google Calendar. We are committed to protecting your privacy and being transparent about how your data is handled.</p>
+    <p>By using ARIA at <strong>https://aiva-1-mxgo.onrender.com</strong>, you agree to the practices described in this policy.</p>
+    <div class="highlight">
+      <span class="icon">✅</span>
+      <span>We do not sell your data, run ads, or share your information with third parties for marketing purposes.</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-num">02</div>
+    <h2>Information We Collect</h2>
+    <p>We collect only what is necessary to provide the scheduling service:</p>
+    <ul>
+      <li><strong>Google Calendar data</strong> — event titles, times, descriptions, and attendees, accessed only when you connect your account and make a request</li>
+      <li><strong>Voice audio</strong> — microphone recordings you submit for transcription, processed immediately and not stored</li>
+      <li><strong>Chat messages</strong> — your text and voice messages to ARIA, held in temporary session memory only</li>
+      <li><strong>Google OAuth tokens</strong> — access and refresh tokens stored in server memory to maintain your calendar connection during a session</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-num">03</div>
+    <h2>How We Use Your Information</h2>
+    <p>Your data is used exclusively to provide the app's core features:</p>
+    <ul>
+      <li>Reading your Google Calendar to answer scheduling questions</li>
+      <li>Creating, updating, and deleting calendar events on your behalf</li>
+      <li>Transcribing your voice messages using OpenAI Whisper</li>
+      <li>Generating AI responses using OpenAI GPT-4o</li>
+    </ul>
+    <p>We do not use your data to train AI models, build advertising profiles, or for any purpose beyond responding to your direct requests.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">04</div>
+    <h2>Third-Party Services</h2>
+    <p>ARIA uses the following third-party services to function. Each has its own privacy policy:</p>
+    <ul>
+      <li><strong>Google Calendar API</strong> — to read and manage your calendar events (<a href="https://policies.google.com/privacy" style="color:var(--accent)" target="_blank">Google Privacy Policy</a>)</li>
+      <li><strong>OpenAI API</strong> — to power AI chat responses and voice transcription (<a href="https://openai.com/privacy" style="color:var(--accent)" target="_blank">OpenAI Privacy Policy</a>)</li>
+      <li><strong>Render</strong> — cloud hosting for the application (<a href="https://render.com/privacy" style="color:var(--accent)" target="_blank">Render Privacy Policy</a>)</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-num">05</div>
+    <h2>Data Retention</h2>
+    <p>ARIA is designed with minimal data retention:</p>
+    <ul>
+      <li>Chat history and OAuth tokens are stored in <strong>server memory only</strong> and are erased when the server restarts</li>
+      <li>Voice audio is transcribed immediately and <strong>never saved to disk</strong> permanently</li>
+      <li>We do not use a database — no personal data is written to persistent storage</li>
+    </ul>
+    <div class="highlight">
+      <span class="icon">🔒</span>
+      <span>Closing your browser or server restart clears all session data. Nothing about you is stored long-term.</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-num">06</div>
+    <h2>Google OAuth &amp; Calendar Access</h2>
+    <p>When you connect Google Calendar, you grant ARIA permission to read and manage your calendar events. Specifically:</p>
+    <ul>
+      <li>We request <code style="background:rgba(79,163,232,0.1);padding:1px 6px;border-radius:4px;font-size:13px">https://www.googleapis.com/auth/calendar</code> scope</li>
+      <li>Access is limited to your primary calendar</li>
+      <li>You can revoke access at any time via <a href="https://myaccount.google.com/permissions" style="color:var(--accent)" target="_blank">Google Account Permissions</a></li>
+      <li>We never access your Gmail, contacts, Drive, or any other Google service</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-num">07</div>
+    <h2>Your Rights</h2>
+    <p>You have full control over your data:</p>
+    <ul>
+      <li><strong>Access</strong> — you can ask us what data we hold about you at any time</li>
+      <li><strong>Deletion</strong> — disconnect Google Calendar and close your session to remove all data</li>
+      <li><strong>Revocation</strong> — revoke Google access at <a href="https://myaccount.google.com/permissions" style="color:var(--accent)" target="_blank">myaccount.google.com/permissions</a></li>
+      <li><strong>Portability</strong> — your calendar data belongs to you and lives in Google Calendar</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-num">08</div>
+    <h2>Security</h2>
+    <p>We take reasonable measures to protect your information:</p>
+    <ul>
+      <li>All traffic is encrypted via HTTPS</li>
+      <li>OAuth tokens are never logged or written to files</li>
+      <li>API keys are stored as environment variables, not in source code</li>
+      <li>The app is hosted on Render with automatic security updates</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-num">09</div>
+    <h2>Children's Privacy</h2>
+    <p>ARIA is not intended for use by children under the age of 13. We do not knowingly collect personal information from children. If you believe a child has provided us with personal information, please contact us immediately.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">10</div>
+    <h2>Changes to This Policy</h2>
+    <p>We may update this Privacy Policy from time to time. Changes will be posted at <strong>https://aiva-1-mxgo.onrender.com/privacy</strong> with an updated date. Continued use of ARIA after changes constitutes acceptance of the updated policy.</p>
+  </div>
+
+  <div class="contact-card">
+    <h3>Questions or Concerns?</h3>
+    <p>If you have any questions about this Privacy Policy or how your data is handled, we're happy to help.</p>
+    <a class="contact-link" href="mailto:wonderpaul242@gmail.com">📧 Contact Us</a>
+  </div>
+
+</div>
+
+<footer>
+  <p>© 2026 ARIA Voice Scheduler · <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a></p>
+</footer>
+
+</body>
+</html>
