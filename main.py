@@ -466,6 +466,12 @@ async def chat(msg: ChatMessage):
         return JSONResponse(status_code=200,
             content={"reply": f"Server error: {str(e)} — check your terminal for details."})
 
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy():
+    with open("privacy.html", encoding="utf-8") as f:
+        return f.read()
+
 @app.post("/transcribe")
 async def transcribe_audio(request: Request):
     """Speech-to-text using local Whisper — free, no API needed."""
