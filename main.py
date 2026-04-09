@@ -74,7 +74,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 GROQ_API_KEY         = "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"
-OPENAI_API_KEY       = "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"  # fallback if no Groq key
+OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY")  # fallback if no Groq key
 GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 REDIRECT_URI         = os.getenv("REDIRECT_URI", "https://aiva-1-mxgo.onrender.com/auth/callback")
